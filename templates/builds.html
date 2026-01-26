@@ -1,0 +1,107 @@
+<html lang="en-US"><head>
+  <title>{{page_title}}</title>
+  <style>
+    body {
+      padding: 0 1em;
+    }
+    main {
+      padding: 1em;
+    }
+  </style>
+</head>
+<body>
+<h1>{{page_title}}</h1>
+
+<header>
+  <form id="form">
+    <label for="filter">Search:</label>
+    <input type="text" id="search" name="search">
+    <input type="reset">
+  </form>
+</header>
+
+<main>
+<table>
+<thead>
+  <tr>
+    <th>Filename</th>
+    <th>Updated at</th>
+  </tr>
+</thead>
+<tbody id="rows">
+  {% for b in items %}
+  <tr>
+    <td class="file"><a href="{{b.url}}">{{b.name}}</a></td>
+    <td><time>{{crate::nanos_to_rfc3339(*b.updated_at)?}}</time></td>
+  </tr>
+  {% endfor %}
+</tbody>
+</table>
+</main>
+
+<footer>
+</footer>
+
+<script>
+
+function updateRow(tr, filter) {
+  tr.style.display = filter(tr) ? '' : 'none';
+}
+
+const debounce = (callback, wait) => {
+  let timeoutId = null;
+  return (...args) => {
+    window.clearTimeout(timeoutId);
+    timeoutId = window.setTimeout(() => {
+      callback(...args);
+    }, wait);
+  };
+};
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const form = document.getElementById('form');
+  const search_input = document.getElementById('search');
+  const tbody = document.getElementById('rows');
+
+  search_input.value = "{{filter}}";
+
+  const updateRows = (filter) => tbody
+    .querySelectorAll('tr')
+    .forEach((tr) => updateRow(tr, filter));
+
+  const input_filter = (tr) => {
+    return (
+      !search_input.value ||
+      tr.querySelector('td.file a')
+        .textContent
+        .includes(search_input.value)
+    );
+  };
+
+  const rowsUpdate = () => {
+    tbody.querySelectorAll('tr').forEach((tr) => {
+      updateRow(tr, (tr) => {
+        return (
+            !search_input.value ||
+            tr.querySelector('td.file a')
+              .textContent
+              .includes(search_input.value)
+        );
+      });
+    });
+  };
+
+  updateRows(input_filter);
+
+  search_input.addEventListener(
+    'input',
+    debounce(() => updateRows(input_filter), 200)
+  );
+
+  form.addEventListener('reset', () => updateRows(() => true));
+});
+
+</script>
+
+
+</body></html>
