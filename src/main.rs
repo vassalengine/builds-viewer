@@ -386,7 +386,7 @@ fn routes(base_path: &str, log_headers: bool) -> Router<Arc<AppState>> {
             get(get_list)
         )
         .route(
-            "/build/{build_id}",
+            &format!("{base_path}/build/{{build_id}}"),
             get(get_build)
         )
         .layer(
