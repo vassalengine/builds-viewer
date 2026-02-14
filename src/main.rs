@@ -41,6 +41,7 @@ pub struct AppState {
     api_client: Client,
     dl_client: Client,
     api_url: String,
+    base_path: String,
     page_title: String,
     db: Pool<Sqlite>
 }
@@ -71,6 +72,7 @@ impl IntoResponse for AppError {
 #[derive(Template)]
 #[template(path = "builds.html")]
 struct BuildsTemplate {
+    base_path: String,
     page_title: String,
     items: Vec<Build>,
     filter: String
@@ -331,6 +333,7 @@ async fn get_list(
     Ok(
         HtmlTemplate(
             BuildsTemplate {
+                base_path: state.base_path.clone(),
                 page_title: state.page_title.clone(),
                 items,
                 filter: query.filter.unwrap_or_default()
@@ -465,6 +468,7 @@ async fn run() -> Result<(), StartupError> {
             .redirect(Policy::none())
             .build()?,
         api_url: config.api_url,
+        base_path: config.base_path.clone(),
         page_title: config.page_title,
         db
     });
