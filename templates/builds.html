@@ -31,7 +31,7 @@
 <tbody id="rows">
   {% for b in items %}
   <tr>
-    <td class="file"><a href="{{b.url}}">{{b.name}}</a></td>
+    <td class="file"><a href="build/{{b.id}}">{{b.name}}</a></td>
     <td><time>{{crate::nanos_to_rfc3339(*b.updated_at)?}}</time></td>
   </tr>
   {% endfor %}

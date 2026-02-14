@@ -5,15 +5,16 @@ use axum::{
         StatusCode,
         header::{AUTHORIZATION, USER_AGENT}
     },
-    extract::{Query, State},
-    response::{Html, IntoResponse, Response},
+    extract::{Query, Path, State},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use glc::server::{setup_logging, serve, SpanMaker};
 use reqwest::{
     Client,
-    header::ACCEPT
+    header::{ACCEPT, HeaderMap, HeaderValue, LOCATION},
+    redirect::Policy
 };
 use serde::Deserialize;
 use std::{
@@ -37,9 +38,9 @@ use tracing::{error, info, Level};
 
 #[derive(Clone)]
 pub struct AppState {
-    client: Client,
+    api_client: Client,
+    dl_client: Client,
     api_url: String,
-    api_token: String,
     page_title: String,
     db: Pool<Sqlite>
 }
@@ -49,9 +50,15 @@ pub enum AppError {
     #[error("{0}")]
     RequestError(#[from] reqwest::Error),
     #[error("{0}")]
+    RequestToStrError(#[from] reqwest::header::ToStrError),
+    #[error("No location")]
+    MissingLocation,
+    #[error("{0}")]
     TimeError(#[from] TimeError),
     #[error("{0}")]
-    SqlxError(#[from] sqlx::Error)
+    SqlxError(#[from] sqlx::Error),
+    #[error("Not found")]
+    NotFound
 }
 
 impl IntoResponse for AppError {
@@ -137,14 +144,14 @@ struct QueryArgs {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(try_from = "RawBuild")] 
+#[serde(try_from = "RawBuild")]
 struct Build {
     id: i64,
     name: String,
     url: String,
     created_at: i64,
     updated_at: i64,
-    expires_at: i64 
+    expires_at: i64
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,11 +165,11 @@ impl TryFrom<RawBuild> for Build {
         Ok(
             Self {
                 id: b.id,
-                name: b.name,              
+                name: b.name,
                 url: b.archive_download_url,
                 created_at: rfc3339_to_nanos(&b.created_at)?,
                 updated_at: rfc3339_to_nanos(&b.updated_at)?,
-                expires_at: rfc3339_to_nanos(&b.expires_at)? 
+                expires_at: rfc3339_to_nanos(&b.expires_at)?
             }
         )
     }
@@ -171,19 +178,14 @@ impl TryFrom<RawBuild> for Build {
 async fn get_builds_page(
     api_url: &str,
     page: usize,
-    api_token: &str,
     client: &Client
-) -> Result<Vec<Build>, AppError> 
+) -> Result<Vec<Build>, AppError>
 {
-    let auth = format!("token {}", api_token);
     let url = format!("{}?page={}", api_url, page);
 
     Ok(
         client
             .get(url)
-            .header(AUTHORIZATION, &auth)
-            .header(ACCEPT, "application/vnd.github.v3+json")
-            .header(USER_AGENT, "builds-viewer")
             .send()
             .await?
             .error_for_status()?
@@ -193,9 +195,31 @@ async fn get_builds_page(
     )
 }
 
+async fn get_build_location(
+    url: &str,
+    client: &Client
+) -> Result<String, AppError>
+{
+    let r = client
+        .head(url)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // return the build location
+    r.headers()
+        .get(LOCATION)
+        .ok_or(AppError::MissingLocation)
+        .and_then(|loc| loc
+            .to_str()
+            .map(String::from)
+            .map_err(AppError::from)
+        )
+}
+
 async fn record_build<'e, E>(
     ex: E,
-    b: &Build 
+    b: &Build
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>
@@ -217,7 +241,7 @@ VALUES (?, ?, ?, ?, ?, ?)
         b.url,
         b.created_at,
         b.updated_at,
-        b.expires_at 
+        b.expires_at
     )
     .execute(ex)
     .await?;
@@ -227,8 +251,7 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 async fn update_builds(
     api_url: &str,
-    api_token: &str,
-    client: &Client,
+    api_client: &Client,
     db: &Pool<Sqlite>,
     now: i64
 ) -> Result<(), AppError>
@@ -238,20 +261,19 @@ async fn update_builds(
         let builds = get_builds_page(
             api_url,
             page,
-            api_token,
-            client
+            api_client,
         ).await?;
 
         for b in builds {
             // stop if we hit an expired build
             if b.expires_at <= now {
                 break;
-            } 
+            }
 
             match record_build(db, &b).await {
                 // stop if we hit a build we've seen before
                 Err(sqlx::Error::Database(e))
-                    if e.is_unique_violation() => break 'gh, 
+                    if e.is_unique_violation() => break 'gh,
                 Err(e) => return Err(e.into()),
                 Ok(()) => continue
             }
@@ -299,8 +321,7 @@ async fn get_list(
 
     update_builds(
         &state.api_url,
-        &state.api_token,
-        &state.client,
+        &state.api_client,
         &state.db,
         now
     ).await?;
@@ -318,11 +339,55 @@ async fn get_list(
     )
 }
 
+
+async fn get_build_url<'e, E>(
+    ex: E,
+    id: i64
+) -> Result<Option<String>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>
+{
+    sqlx::query_scalar!(
+        "
+SELECT url
+FROM builds
+WHERE id = ?
+        ",
+        id
+    )
+    .fetch_optional(ex)
+    .await
+}
+
+async fn get_build(
+    Path(build_id): Path<u64>,
+    State(state): State<Arc<AppState>>
+) -> Result<Redirect, AppError>
+{
+    let id = i64::try_from(build_id)
+        .map_err(|_| AppError::NotFound)?;
+
+    let url = get_build_url(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let redirect_url = get_build_location(
+        &url,
+        &state.dl_client
+    ).await?;
+
+    Ok(Redirect::to(&redirect_url))
+}
+
 fn routes(base_path: &str, log_headers: bool) -> Router<Arc<AppState>> {
     Router::new()
         .route(
             if base_path.is_empty() { "/" } else { base_path },
             get(get_list)
+        )
+        .route(
+            "/build/{build_id}",
+            get(get_build)
         )
         .layer(
             ServiceBuilder::new()
@@ -364,7 +429,9 @@ enum StartupError {
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
-    Client(#[from] reqwest::Error)
+    Client(#[from] reqwest::Error),
+    #[error("{0}")]
+    Token(#[from] reqwest::header::InvalidHeaderValue)
 }
 
 async fn run() -> Result<(), StartupError> {
@@ -376,12 +443,28 @@ async fn run() -> Result<(), StartupError> {
         .connect(&format!("sqlite://{}", &config.db_path))
         .await?;
 
+    // set up default headers for GitHub API
+    let tok = format!("token {}", config.api_token);
+    let mut auth = HeaderValue::from_str(&tok)?;
+    auth.set_sensitive(true);
+
+    let headers = HeaderMap::from_iter([
+        (AUTHORIZATION, auth),
+        (ACCEPT, HeaderValue::from_static("application/vnd.github.v3+json")),
+        (USER_AGENT, HeaderValue::from_static("builds-viewer"))
+    ]);
+
     let state = Arc::new(AppState {
-        client: Client::builder()
+        api_client: Client::builder()
+            .default_headers(headers.clone())
             .timeout(Duration::from_secs(10))
             .build()?,
+        dl_client: Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(10))
+            .redirect(Policy::none())
+            .build()?,
         api_url: config.api_url,
-        api_token: config.api_token,
         page_title: config.page_title,
         db
     });
