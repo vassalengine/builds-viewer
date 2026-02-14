@@ -434,12 +434,18 @@ enum StartupError {
     #[error("{0}")]
     Client(#[from] reqwest::Error),
     #[error("{0}")]
-    Token(#[from] reqwest::header::InvalidHeaderValue)
+    Token(#[from] reqwest::header::InvalidHeaderValue),
+    #[error("base_path must not be /")]
+    BadBasePath
 }
 
 async fn run() -> Result<(), StartupError> {
     info!("Reading config.toml");
     let config: Config = toml::from_str(&fs::read_to_string("config.toml")?)?;
+
+    if config.base_path == "/" {
+        return Err(StartupError::BadBasePath);
+    }
 
     let db = SqlitePoolOptions::new()
         .max_connections(5)
