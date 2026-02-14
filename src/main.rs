@@ -120,7 +120,7 @@ fn now_nanos() -> Result<i64, TimeError> {
 struct RawBuild {
     id: i64,
     name: String,
-    url: String,
+    archive_download_url: String,
     created_at: String,
     updated_at: String,
     expires_at: String
@@ -159,7 +159,7 @@ impl TryFrom<RawBuild> for Build {
             Self {
                 id: b.id,
                 name: b.name,              
-                url: b.url,
+                url: b.archive_download_url,
                 created_at: rfc3339_to_nanos(&b.created_at)?,
                 updated_at: rfc3339_to_nanos(&b.updated_at)?,
                 expires_at: rfc3339_to_nanos(&b.expires_at)? 
