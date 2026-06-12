@@ -16,7 +16,7 @@
 
 <header>
   <form id="form">
-    <label for="filter">Search:</label>
+    <label for="search">Search:</label>
     <input type="text" id="search" name="search">
     <input type="reset">
   </form>
@@ -65,7 +65,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const search_input = document.getElementById('search');
   const tbody = document.getElementById('rows');
 
-  search_input.value = "{{filter}}";
+  search_input.value = "{{search}}";
 
   const updateRows = (filter) => tbody
     .querySelectorAll('tr')

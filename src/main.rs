@@ -75,7 +75,7 @@ struct BuildsTemplate {
     base_path: String,
     page_title: String,
     items: Vec<Build>,
-    filter: String
+    search: String
 }
 
 struct HtmlTemplate<T>(T);
@@ -142,7 +142,7 @@ struct GitHubResult {
 
 #[derive(Deserialize)]
 struct QueryArgs {
-    filter: Option<String>
+    search: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,7 +336,7 @@ async fn get_list(
                 base_path: state.base_path.clone(),
                 page_title: state.page_title.clone(),
                 items,
-                filter: query.filter.unwrap_or_default()
+                search: query.search.unwrap_or_default()
             }
         )
     )
