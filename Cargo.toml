@@ -10,7 +10,7 @@ chrono = "0.4"
 glc = { path = "../V4/api/game-library/game-library-common" }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
-sqlx = { version = "0.8", features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
+sqlx = { version = "0.9", features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 toml = "1.0"
