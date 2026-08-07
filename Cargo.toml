@@ -7,7 +7,7 @@ edition = "2024"
 askama = { version = "0.16", features = ["serde_json"] }
 axum = { version = "0.8", features = ["http1", "http2", "macros", "query", "tokio"] }
 chrono = "0.4"
-glc = { path = "../V4/api/game-library/game-library-common" }
+glc = { git = "https://github.com/vassalengine/game-library-common.git" }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 sqlx = { version = "0.9", features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
